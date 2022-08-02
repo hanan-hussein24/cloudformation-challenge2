@@ -1,0 +1,159 @@
+Description: >
+    This template deploys a VPC, with public and private subnets spread 
+    across Availabilty Zones. It deploys an Internet Gateway, with a default 
+    route on the public subnets. It deploys NAT Gateways, and default routes
+    in the private subnets.
+
+Parameters:
+
+   EnvironmentName:
+      Description: An environment name that will be prefixed to resource names
+      Type: String
+
+   VpcCIDR:
+      Description: Please enter the IP range (CIDR notation) for this VPC
+      Type: String
+      Default: 10.0.0.0/16
+
+   PublicSubnet1CIDR:
+      Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+      Type: String
+      Default: 10.0.1.0/24
+
+   PrivateSubnet1CIDR:
+      Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+      Type: String
+      Default: 10.0.2.0/24
+
+Resources:
+
+   MainVPC:
+      Type: AWS::EC2::VPC
+      Properties:
+         CidrBlock: !Ref VpcCIDR
+         EnableDnsHostnames: "true"
+         Tags:
+            - Key: Name
+              Value: !Ref EnvironmentName
+
+   InternetGW:
+      Type: AWS::EC2::InternetGateway
+      Properties:
+         Tags:
+            - Key: Name
+              Value: !Ref EnvironmentName
+
+   AttachInternetGateway:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+         InternetGatewayId: !Ref InternetGW
+         VpcId: !Ref MainVPC
+
+   PublicSubnet1:
+      Type: AWS::EC2::Subnet
+      Properties:
+         VpcId: !Ref MainVPC
+         AvailabilityZone: !Select [ 0, !GetAZs '' ]
+         CidrBlock: !Ref PublicSubnet1CIDR
+         MapPublicIpOnLaunch: true
+         Tags:
+            - Key: Name
+              Value: !Sub ${EnvironmentName} Public Subnet (AZ)
+
+   PrivateSubnet1:
+      Type: AWS::EC2::Subnet
+      Properties:
+         VpcId: !Ref MainVPC
+         AvailabilityZone: !Select [ 0, !GetAZs '' ]
+         CidrBlock: !Ref PrivateSubnet1CIDR
+         MapPublicIpOnLaunch: false
+         Tags:
+            - Key: Name
+              Value: !Sub ${EnvironmentName} Private Subnet (AZ)
+
+   EIP:
+      Type: AWS::EC2::EIP
+      DependsOn: AttachInternetGateway
+      Properties:
+         Domain: vpc
+
+   NAT:
+      Type: AWS::EC2::NatGateway
+      Properties:
+         AllocationId: !GetAtt EIP.AllocationId
+         SubnetId: !Ref PublicSubnet1
+
+   PublicRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+         VpcId: !Ref MainVPC
+         Tags:
+            - Key: Name
+              Value: !Sub ${EnvironmentName} Public Routes
+
+   PublicInternetRoute:
+      Type: AWS::EC2::Route
+      DependsOn: AttachInternetGateway
+      Properties:
+         RouteTableId: !Ref PublicRouteTable
+         DestinationCidrBlock: 0.0.0.0/0
+         GatewayId: !Ref InternetGW
+
+   AssociatePUBRT:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+         RouteTableId: !Ref PublicRouteTable
+         SubnetId: !Ref PublicSubnet1
+
+   PrivateRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+         VpcId: !Ref MainVPC
+         Tags:
+            - Key: Name
+              Value: !Sub ${EnvironmentName} Private Routes (AZ)
+
+   PrivateInternetOutboundRoute:
+      Type: AWS::EC2::Route
+      Properties:
+         RouteTableId: !Ref PrivateRouteTable
+         DestinationCidrBlock: 0.0.0.0/0
+         NatGatewayId: !Ref NAT
+
+   AssociatePRIVRT:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+         RouteTableId: !Ref PrivateRouteTable
+         SubnetId: !Ref PrivateSubnet1
+
+Outputs:
+
+   VPC:
+      Description: A reference to the created VPC
+      Value: !Ref MainVPC
+      Export:
+         Name: !Sub ${EnvironmentName}-VPCID
+
+   VPCPublicRouteTable:
+      Description: Public Routing
+      Value: !Ref PublicRouteTable
+      Export:
+         Name: !Sub ${EnvironmentName}-PUB-RT
+
+   VPCPrivateRouteTable:
+      Description: Private Routing AZ1
+      Value: !Ref PrivateRouteTable
+      Export:
+         Name: !Sub ${EnvironmentName}-PRI1-RT
+
+   PublicSubnet:
+      Description: A reference to the public subnet in the 1st Availability Zone
+      Value: !Ref PublicSubnet1
+      Export:
+         Name: !Sub ${EnvironmentName}-PUB1-SN
+
+   PrivateSubnet:
+      Description: A reference to the private subnet in the 1st Availability Zone
+      Value: !Ref PrivateSubnet1
+      Export:
+         Name: !Sub ${EnvironmentName}-PRI1-SN
